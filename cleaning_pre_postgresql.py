@@ -29,7 +29,8 @@ def read_books_raw(filepath):
     with open(f"{filepath}/books.csv", "r", encoding="utf-8") as f:
         reader = csv.reader(f)
         for row in reader:
-            if row:  # Ensuring row is not empty 
+            # Ensuring row is not empty
+            if row:   
                 genre = row[0]
                 books_str = row[1]
                 try:
@@ -41,81 +42,81 @@ def read_books_raw(filepath):
                 books_raw[genre] = books_list
     return books_raw
 
-#########
-# Books #
-#########
-def clean_books(books):
+##################################
+# Books, Book Tags & Book Series #
+##################################
+def clean_books_tags_series(books):
     books_cleaned = {}
+    book_tags_cleaned = {}
+    book_series_cleaned = {}
+    
+    # Used for finding letters in the English alphabet
     check_letters = re.compile(r"[A-Za-z]")
-    for key in books.keys():
-        book_list = []
-        for value in books[key]:
-            
-            # Skip book without title
-            if not value["title"].strip():
-                continue
-            
-            # Keep book with a numerical title
-            if value["title"].isdigit():
-                keep_book = True
-            
-            # Skip book without any letters ranging from A-Z (a-z) and not in English
-            elif not check_letters.search(value["title"]):
-                continue
-            else:
-                keep_book = is_english(value["title"])
-            
-            if not keep_book:
-                continue
-            
-            temp_book = {
-                "Pages": value["pages"],
-                "Title": value["title"],
-                "BookId": value["id"],
-                "Rating": value["rating"],
-                "ReleaseYear": value["release_year"],
-                "Description": value["description"],
-                "BookImage": value["image"]["url"] if value["image"] is not None and "url" in value["image"] else None
-                }
-            book_list.append(temp_book)
-        books_cleaned[key] = pd.DataFrame(book_list).drop_duplicates()
-    return books_cleaned
-                
-#############
-# Book tags #
-#############
-def clean_book_tags(books):
-    book_tags = {}
-    for key in books.keys():
-        tag_list = []
-        for value in books[key]:
-            temp_tags = {
-                "BookId": value["id"],
-                "TagId": [tag_dict["tag"]["id"] for tag_dict in value["taggings"]]
-                }
-            tag_list.append(temp_tags)
-        book_tags[key] = tag_list
-    return book_tags
+    
+    for key, vals in books.items():
+        df = pd.DataFrame(vals)
         
-###############
-# Book series #
-###############
-def clean_book_series(books):
-    book_series = {}
-    for key in books.keys():
-        series = []
-        for value in books[key]:
-            if len(value["book_series"]) != 0:
-                temp_series = {
-                    "BookId": value["book_series"][0]["book_id"], 
-                    "Position": value["book_series"][0]["position"], 
-                    "RelatedBookId": value["book_series"][0]["series"]["id"]
-                    }
-                series.append(temp_series)
-        book_series[key] = series
-    return book_series
-
-
+        # Drop empty titles
+        df["title"] = df["title"].str.strip()
+        df = df[df["title"] != '']
+        
+        # Purely numerical titles
+        is_digit = df["title"].str.isdigit()
+        
+        # Has English letters
+        has_letter = df["title"].str.contains(check_letters)
+        
+        # is_english on titles with English letters and numerical titles
+        detect_titles = (~is_digit) & has_letter
+        english_titles = pd.Series(False, index=df.index)
+        english_titles[detect_titles] = df.loc[detect_titles, "title"].apply(is_english)
+        
+        # Keep either numerical titles or English titles
+        keep = is_digit | english_titles
+        df = df[keep]
+        
+        df = df.drop_duplicates("id")
+        
+        #########
+        # Books #
+        #########
+        df_books = df[["pages", "title", "id", "rating", "release_year", "description"]]
+        df_books = df_books.rename(columns={
+            "pages": "Pages",
+            "title": "Title",
+            "id": "BookId",
+            "rating": "Rating",
+            "release_year": "ReleaseYear",
+            "description": "Description",
+            })
+        df_books["BookImage"] = df["image"].apply(
+            lambda img: img.get("url") if isinstance(img, dict) else None
+            )
+        
+        books_cleaned[key] = df_books
+        
+        #############
+        # Book Tags #
+        #############
+        df_book_tags = df[["id"]].copy()
+        df_book_tags["TagId"] = df["taggings"].apply(
+            lambda tag_list: [tag_dict["tag"]["id"] for tag_dict in tag_list]
+            if isinstance(tag_list, list) else []
+            )
+        
+        book_tags_cleaned[key] = df_book_tags
+        
+        ###############
+        # Book Series #
+        ###############
+        df_temp = df[df["book_series"].apply(lambda series_list: len(series_list) > 0)]
+        df_book_series = df_temp[["id"]].rename(columns={"id": "BookId"})
+        df_book_series["Position"] = df_temp["book_series"].apply(lambda series_list: series_list[0]["position"])
+        df_book_series["RelatedBookId"] = df_temp["book_series"].apply(lambda series_list: series_list[0]["series"]["id"])
+        
+        book_series_cleaned[key] = df_book_series
+        
+    return books_cleaned, book_tags_cleaned, book_series_cleaned
 
 ###########    
 # Authors #
@@ -160,7 +161,7 @@ def read_tags(filepath):
     return tags_raw
 
 ################
-# Tags cleaned #
+# Tags Cleaned #
 ################
 def clean_tags(tags_raw):
     df_raw = pd.DataFrame(tags_raw)
