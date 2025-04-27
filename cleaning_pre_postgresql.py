@@ -29,8 +29,7 @@ def read_books_raw(filepath):
     with open(f"{filepath}/books.csv", "r", encoding="utf-8") as f:
         reader = csv.reader(f)
         for row in reader:
-            # Ensuring row is not empty
-            if row:   
+            if row: # Ensuring row is not empty
                 genre = row[0]
                 books_str = row[1]
                 try:
@@ -80,7 +79,7 @@ def clean_books_tags_series(books):
         #########
         # Books #
         #########
-        df_books = df[["pages", "title", "id", "rating", "release_year", "description"]]
+        df_books = df[["pages", "title", "id", "rating", "release_year", "description"]].copy()
         df_books = df_books.rename(columns={
             "pages": "Pages",
             "title": "Title",
@@ -89,6 +88,13 @@ def clean_books_tags_series(books):
             "release_year": "ReleaseYear",
             "description": "Description",
             })
+        df_books["Pages"] = (
+            # non-numbers to NaN and NaN to NA
+            pd.to_numeric(df_books["Pages"], errors="coerce").astype("Int64") 
+            )
+        df_books["Rating"] = (
+            pd.to_numeric(df_books["Rating"], errors="coerce").astype("Float64").round(1)
+            )
         df_books["BookImage"] = df["image"].apply(
             lambda img: img.get("url") if isinstance(img, dict) else None
             )
@@ -111,7 +117,14 @@ def clean_books_tags_series(books):
         ###############
         df_temp = df[df["book_series"].apply(lambda series_list: len(series_list) > 0)]
         df_book_series = df_temp[["id"]].rename(columns={"id": "BookId"})
-        df_book_series["Position"] = df_temp["book_series"].apply(lambda series_list: series_list[0]["position"])
+        
+        # Raw position
+        raw_pos = df_temp["book_series"].apply(lambda series_list: series_list[0]["position"])
+        df_book_series["Position"] = (
+            # Coerce to numeric (if a book has a position with a decimal it gets treated as NaN)
+            pd.to_numeric(raw_pos, errors="coerce").round(0).astype("Int64")
+            )
+        
         df_book_series["RelatedBookId"] = df_temp["book_series"].apply(lambda series_list: series_list[0]["series"]["id"])
         
         book_series_cleaned[key] = df_book_series
@@ -138,7 +151,11 @@ def clean_authors(filepath):
                 "AuthorImage": temp_dict["image"]["url"] if temp_dict["image"] is not None and "url" in temp_dict["image"] else None
                 }     
             author_list.append(temp_author)
-        authors_cleaned[genre] = pd.DataFrame(author_list).drop_duplicates()
+        df_temp = pd.DataFrame(author_list).drop_duplicates()
+        df_temp["BornYear"] = (
+            pd.to_numeric(df_temp["BornYear"], errors="coerce").astype("Int64")
+            )
+        authors_cleaned[genre] = df_temp
     return authors_cleaned
 
 ############

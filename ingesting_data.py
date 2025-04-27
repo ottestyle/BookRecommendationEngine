@@ -1,6 +1,7 @@
 import os
 import psycopg2
-from psycopg2.extras import execute_values
+import pandas as pd
+#from psycopg2.extras import execute_values
 
 module_path = os.environ["BOOK_RECOMMENDATION_PATH"]
 data_path = os.environ["BOOK_RECOMMENDATION_DATA_PATH"]
@@ -41,14 +42,14 @@ cur = conn.cursor()
 #########
 query_table_books = """
 CREATE TABLE IF NOT EXISTS Books (
-    id INT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     Pages INT,
-    Title VARCHAR(255),
-    BookId INT,
-    Rating NUMERIC(2),
+    Title TEXT,
+    BookId BIGINT,
+    Rating NUMERIC(2,1),
     ReleaseYear INT,
-    Description VARCHAR(255),
-    BookImage VARCHAR(255)
+    Description TEXT,
+    BookImage TEXT
     );
 """
 
@@ -60,10 +61,22 @@ INSERT INTO Books (Pages, Title, BookId, Rating, ReleaseYear, Description, BookI
 VALUES (%s, %s, %s, %s, %s, %s, %s);
 """
 
-# Executing insert statement
-for key in books_tags_series[0]:
-    df = books_tags_series[0][key]
-    cur.execute(query_insert_books, df)
+# Executing insert statement for books
+for key, df in books_tags_series[0].items():
+    for _, row in df.iterrows(): # Ignoring the first value "_"
+        clean_values = []
+        for v in (
+                row["Pages"],
+                row["Title"],
+                row["BookId"],
+                row["Rating"],
+                row["ReleaseYear"],
+                row["Description"],
+                row["BookImage"],
+            ):
+                # Converting NA into None
+                clean_values.append(None if pd.isna(v) else v)
+        cur.execute(query_insert_books, tuple(clean_values))
 
 # Commit changes
 conn.commit()
