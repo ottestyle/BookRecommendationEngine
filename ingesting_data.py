@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from psycopg2.extras import execute_values
 import pandas as pd
 
 module_path = os.environ["BOOK_RECOMMENDATION_PATH"]
@@ -54,28 +55,24 @@ CREATE TABLE IF NOT EXISTS books (
 
 cur.execute(query_table_books)
 
-# SQL INSERT statement
-query_insert_books = """
-INSERT INTO books (pages, title, book_id, rating, release_year, description, book_image)
-VALUES (%s, %s, %s, %s, %s, %s, %s);
-"""
-
-# Executing insert statement for books
-for key, df in books_tags_series[0].items():
-    for _, row in df.iterrows(): # Ignoring the first value "_"
-        clean_values = []
-        for v in (
-                row["Pages"],
-                row["Title"],
-                row["BookId"],
-                row["Rating"],
-                row["ReleaseYear"],
-                row["Description"],
-                row["BookImage"],
-            ):
-                # Converting NA into None
-                clean_values.append(None if pd.isna(v) else v)
-        cur.execute(query_insert_books, tuple(clean_values))
+book_rows = []
+for df in books_tags_series[0].values():
+    # Setting plain python objects & converting NA into None if present
+    df_clean = df.astype(object).where(pd.notna(df), None)
+    
+    # List of tuples for each row in the dataframes
+    book_rows += df_clean.itertuples(index=False, name=None)
+    
+# INSERT all tuples 
+execute_values(
+    cur,
+    """
+    INSERT INTO books
+      (pages, title, book_id, rating, release_year, description, book_image)
+    VALUES %s
+    """,
+    book_rows
+)
 
 # Commit changes
 conn.commit()
@@ -93,17 +90,20 @@ CREATE TABLE IF NOT EXISTS book_tags (
 
 cur.execute(query_table_book_tags)
 
-# INSERT statement book_tags
-query_insert_book_tags = """
-INSERT INTO book_tags (book_id, tag_id)
-VALUES (%s, %s);
-"""
+book_tags_rows = []
+for df in books_tags_series[1].values():
+    df_clean = df.copy()
+    book_tags_rows += df_clean.itertuples(index=False, name=None)
 
-for key, df in books_tags_series[1].items():
-    for _, row in df.iterrows():
-        clean_values = (row["id"], row["TagId"])
-        cur.execute(query_insert_book_tags, clean_values)
-        
+execute_values(
+    cur,
+    """
+    INSERT INTO book_tags (book_id, tag_id)
+    VALUES %s
+    """,
+    book_tags_rows
+    )
+
 conn.commit()
 
 ###############
@@ -120,21 +120,21 @@ CREATE TABLE IF NOT EXISTS book_series (
 
 cur.execute(query_table_book_series)
 
-# INSERT statement book_series
-query_insert_book_series = """
-INSERT INTO book_series (book_id, position, related_book_id)
-VALUES (%s, %s, %s);
-"""
-    
-for key, df in books_tags_series[2].items():
-    for _, row in df.iterrows():
-        position = row["Position"]
-        if pd.isna(position):
-            position = None
-        clean_values = (row["BookId"], position, row["RelatedBookId"])
-        cur.execute(query_insert_book_series, clean_values)
+book_series_rows = []
+for df in books_tags_series[2].values():
+    df_clean = df.astype(object).where(pd.notna(df), None)
+    book_series_rows += df_clean.itertuples(index=False, name=None)
 
-conn.commit()    
+execute_values(
+    cur,
+    """
+    INSERT INTO book_series (book_id, position, related_book_id)
+    VALUES %s
+    """,
+    book_series_rows
+    )
+
+conn.commit()
 
 ###########
 # Authors #
@@ -152,20 +152,21 @@ CREATE TABLE IF NOT EXISTS authors (
 
 cur.execute(query_table_authors)
 
-# INSERT statement authors
-query_insert_authors = """
-INSERT INTO authors (author_id, name, author_bio, born_year, author_image)
-VALUES (%s, %s, %s, %s, %s);
-"""
+authors_rows = []
+for df in authors.values():
+    df_clean = df.astype(object).where(pd.notna(df), None)
+    authors_rows += df_clean.itertuples(index=False, name=None)
 
-for key, df in authors.items():
-    for _, row in df.iterrows():
-        clean_values = []
-        for v in row:
-            clean_values.append(None if pd.isna(v) else v)
-        cur.execute(query_insert_authors, tuple(clean_values))
-        
-conn.commit() 
+execute_values(
+    cur,
+    """
+    INSERT INTO authors (author_id, name, author_bio, born_year, author_image)
+    VALUES %s
+    """,
+    authors_rows
+    )
+
+conn.commit()
             
 ########
 # Tags #
@@ -181,19 +182,23 @@ CREATE TABLE IF NOT EXISTS tags (
 
 cur.execute(query_table_tags)
 
-# INSERT statement tags
-query_insert_tags = """
-INSERT INTO tags (category, tag_id, tag_name)
-VALUES (%s, %s, %s);
-"""
-
-for key, df, in tags.items():
-    for _, row in df.iterrows():
-        clean_values = (key, row["TagId"], row["TagName"])
-        cur.execute(query_insert_tags, clean_values)
-
-conn.commit() 
+tags_rows = []
+for key, df in tags.items():
+    df_clean = df[["TagId", "TagName"]]
+    df_clean["Category"] = key
     
-# Close cursor and connection
-cur.close()
-conn.close()
+    # Reordering columns
+    df_clean = df_clean.iloc[:, [2, 0, 1]]
+    
+    tags_rows += df_clean.itertuples(index=False, name=None)
+
+execute_values(
+    cur,
+    """
+    INSERT INTO tags (category, tag_id, tag_name)
+    VALUES %s
+    """,
+    tags_rows
+    )
+
+conn.commit()
