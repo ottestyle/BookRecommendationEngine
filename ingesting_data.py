@@ -17,7 +17,7 @@ from cleaning_pre_postgresql import (
 books_raw = read_books_raw(data_path)
 books_tags_series = clean_books_tags_series(books_raw)
 
-authors = clean_authors(data_path)
+authors = clean_authors(data_path, books_tags_series["book_authors"])
 
 tags_raw = read_tags(data_path)
 tags = clean_tags(tags_raw)
@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS books (
     rating NUMERIC(2,1),
     release_year INT,
     description TEXT,
+    created_at DATE,
+    ratings_count INT,
+    reviews_count INT,
+    editions_count INT,
+    lists_count INT,
+    users_read_count INT,
     book_image TEXT
     );
 """
@@ -56,7 +62,7 @@ CREATE TABLE IF NOT EXISTS books (
 cur.execute(query_table_books)
 
 book_rows = []
-for df in books_tags_series[0].values():
+for df in books_tags_series["books"].values():
     # Setting plain python objects & converting NA into None if present
     df_clean = df.astype(object).where(pd.notna(df), None)
     
@@ -68,13 +74,43 @@ execute_values(
     cur,
     """
     INSERT INTO books
-      (pages, title, book_id, rating, release_year, description, book_image)
+      (pages, title, book_id, rating, release_year, description, created_at,
+       ratings_count, reviews_count, editions_count, lists_count, users_read_count, book_image)
     VALUES %s
     """,
     book_rows
 )
 
 # Commit changes
+conn.commit()
+
+################
+# Book Authors #
+################
+query_table_book_authors = """
+CREATE TABLE IF NOT EXISTS book_authors (
+    id SERIAL PRIMARY KEY,
+    book_id BIGINT,
+    author_id BIGINT[]
+    );
+"""
+
+cur.execute(query_table_book_authors)
+
+book_authors_rows = []
+for df in books_tags_series["book_authors"].values():
+    df_clean = df.copy()
+    book_authors_rows += df_clean.itertuples(index=False, name=None)
+
+execute_values(
+    cur,
+    """
+    INSERT INTO book_authors (book_id, author_id)
+    VALUES %s
+    """,
+    book_authors_rows
+    )
+
 conn.commit()
 
 #############
@@ -91,7 +127,7 @@ CREATE TABLE IF NOT EXISTS book_tags (
 cur.execute(query_table_book_tags)
 
 book_tags_rows = []
-for df in books_tags_series[1].values():
+for df in books_tags_series["book_tags"].values():
     df_clean = df.copy()
     book_tags_rows += df_clean.itertuples(index=False, name=None)
 
@@ -121,7 +157,7 @@ CREATE TABLE IF NOT EXISTS book_series (
 cur.execute(query_table_book_series)
 
 book_series_rows = []
-for df in books_tags_series[2].values():
+for df in books_tags_series["book_series"].values():
     df_clean = df.astype(object).where(pd.notna(df), None)
     book_series_rows += df_clean.itertuples(index=False, name=None)
 
@@ -174,9 +210,10 @@ conn.commit()
 query_table_tags = """
 CREATE TABLE IF NOT EXISTS tags (
     id SERIAL PRIMARY KEY,
-    category TEXT,
     tag_id INT,
-    tag_name TEXT
+    tag_name TEXT,
+    category TEXT,
+    category_id INT
     );
 """
 
@@ -184,18 +221,13 @@ cur.execute(query_table_tags)
 
 tags_rows = []
 for key, df in tags.items():
-    df_clean = df[["TagId", "TagName"]]
-    df_clean["Category"] = key
-    
-    # Reordering columns
-    df_clean = df_clean.iloc[:, [2, 0, 1]]
-    
+    df_clean = df.copy()
     tags_rows += df_clean.itertuples(index=False, name=None)
 
 execute_values(
     cur,
     """
-    INSERT INTO tags (category, tag_id, tag_name)
+    INSERT INTO tags (tag_id, tag_name, category, category_id)
     VALUES %s
     """,
     tags_rows

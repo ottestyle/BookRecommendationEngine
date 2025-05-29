@@ -2,6 +2,11 @@ import requests
 import pandas as pd
 import time
 import os
+import csv
+
+data_path = os.environ["BOOK_RECOMMENDATION_DATA_PATH"]
+
+os.chdir(data_path)
 
 url = "https://api.hardcover.app/v1/graphql"
 
@@ -68,6 +73,15 @@ for genre in genres:
             rating
             release_year
             description
+            created_at
+            ratings_count
+            reviews_count
+            editions_count
+            lists_count
+            users_read_count
+            contributions {{
+                author_id
+                }}
             book_series {{
               book_id
               featured
@@ -81,9 +95,7 @@ for genre in genres:
               url
             }}
             taggings {{
-              tag {{
-                id
-              }}
+              tag_id
             }}
           }}
         }}
@@ -174,7 +186,6 @@ while True:
         tag
         tag_category {
             category
-            created_at
             id
             }
       }
